@@ -1,0 +1,38 @@
+name: Update ICS
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+
+      - name: Install deps
+        run: pip install ics
+
+      - name: Run script
+        run: python generate.py
+
+      - name: Deploy to gh-pages
+        run: |
+          mkdir gh-pages
+          mv opencritic_filtered.ics gh-pages/index.ics
+          cd gh-pages
+          git init
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add index.ics
+          git commit -m "Update .ics"
+          git branch -M gh-pages
+          git remote add origin https://github.com/${{ github.repository }}.git
+          git push -f origin gh-pages
