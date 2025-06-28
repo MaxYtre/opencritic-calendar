@@ -1,5 +1,8 @@
 name: Update ICS
 
+permissions:
+  contents: write
+
 on:
   schedule:
     - cron: '0 0 * * 0'
@@ -12,10 +15,10 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.11
+      - name: Setup Git for pushing
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Install deps
         run: pip install ics
@@ -29,8 +32,6 @@ jobs:
           mv opencritic_filtered.ics gh-pages/index.ics
           cd gh-pages
           git init
-          git config user.name "GitHub Action"
-          git config user.email "action@github.com"
           git add index.ics
           git commit -m "Update .ics"
           git branch -M gh-pages
