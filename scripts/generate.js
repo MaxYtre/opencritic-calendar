@@ -1,53 +1,53 @@
-import fetch from 'node-fetch';
-import ical from 'node-ical';
-import { DateTime } from 'luxon';
-import fs from 'fs';
+import fetch from "node-fetch";
+import ical from "node-ical";
+import { DateTime } from "luxon";
+import fs from "fs";
 
-const SOURCE_URL  = 'https://img.opencritic.com/calendar/OpenCritic.ics';
-const OUTPUT_FILE = 'docs/calendar.ics';
-const CUTOFF      = DateTime.now().minus({ months: 6 });   // 6 месяцев назад
+const SOURCE_URL = "https://img.opencritic.com/calendar/OpenCritic.ics";
+const OUTPUT_PATH = "docs/calendar.ics";
+const NOW = DateTime.utc();
+const HALF_YEAR_AGO = NOW.minus({ months: 6 });
 
-/* 1 Загрузка исходного .ics */
 const res = await fetch(SOURCE_URL);
-if (!res.ok) throw new Error(`HTTP ${res.status} при скачивании ${SOURCE_URL}`);
-const rawICS = await res.text();
+if (!res.ok) {
+  throw new Error(`Failed to fetch calendar: ${res.statusText}`);
+}
+const rawData = await res.text();
+const parsed = ical.parseICS(rawData);
 
-/* 2 Парсинг  ICS */
-const parsed = ical.parseICS(rawICS);
+const events = Object.values(parsed).filter(e =>
+  e.type === "VEVENT" &&
+  e.start &&
+  DateTime.fromJSDate(e.start) >= HALF_YEAR_AGO
+);
 
-/* 3 Фильтрация событий */
-let vc = `BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//OpenCritic.com//OpenCritic 2025 Gaming Calendar//EN
-NAME:OpenCritic Gaming Calendar
-X-WR-CALNAME:OpenCritic Gaming Calendar`;
-
-let kept = 0;
-for (const key in parsed) {
-  const ev = parsed[key];
-  if (ev.type !== 'VEVENT') continue;
-  if (!ev.start || DateTime.fromJSDate(ev.start) < CUTOFF) continue;
-
-  const dtStart = DateTime.fromJSDate(ev.start).toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'");
-  const dtEnd   = ev.end ? DateTime.fromJSDate(ev.end).toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'") : null;
-
-  vc += `
-BEGIN:VEVENT
-UID:${ev.uid}
-DTSTAMP:${DateTime.utc().toFormat("yyyyMMdd'T'HHmmss'Z'")}
-DTSTART:${dtStart}
-${dtEnd ? `DTEND:${dtEnd}\n` : ''}SUMMARY:${ev.summary || ''}
-DESCRIPTION:${(ev.description || '').replace(/\r?\n/g, '\\n')}
-LOCATION:${ev.location || ''}
-END:VEVENT`;
-  kept++;
+// RFC 5545 requires CRLF endings and 75-char max line length
+function foldLine(line) {
+  if (line.length <= 75) return line;
+  return line.match(/.{1,73}/g).join("\r\n ");
 }
 
-vc += `
-END:VCALENDAR
-`;
+const lines = [
+  "BEGIN:VCALENDAR",
+  "VERSION:2.0",
+  "PRODID:-//OpenCritic.com//OpenCritic 2025 Gaming Calendar//EN",
+  "NAME:OpenCritic Gaming Calendar",
+  "X-WR-CALNAME:OpenCritic Gaming Calendar"
+];
 
-/* 4 Запись файла */
-fs.mkdirSync('docs', { recursive: true });
-fs.writeFileSync(OUTPUT_FILE, vc.trimEnd(), 'utf8');
-console.log(`Готово: сохранено ${kept} событий ➜ ${OUTPUT_FILE}`);
+for (const e of events) {
+  lines.push("BEGIN:VEVENT");
+  if (e.summary) lines.push(foldLine(`SUMMARY:${e.summary}`));
+  lines.push(`DTSTART:${DateTime.fromJSDate(e.start).toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'")}`);
+  if (e.end) {
+    lines.push(`DTEND:${DateTime.fromJSDate(e.end).toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'")}`);
+  }
+  if (e.description) lines.push(foldLine(`DESCRIPTION:${e.description}`));
+  if (e.url) lines.push(foldLine(`URL:${e.url}`));
+  lines.push("END:VEVENT");
+}
+
+lines.push("END:VCALENDAR");
+
+fs.writeFileSync(OUTPUT_PATH, lines.join("\r\n") + "\r\n", "utf8");
+console.log(`Generated ${events.length} events into ${OUTPUT_PATH}`);
