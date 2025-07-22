@@ -1,46 +1,46 @@
 import fetch from "node-fetch";
 import ical from "node-ical";
-import fs from "fs";
 import { DateTime } from "luxon";
+import fs from "fs";
 
-const url = "https://img.opencritic.com/calendar/OpenCritic.ics";
-console.log("Загрузка .ics с OpenCritic...");
-const res = await fetch(url);
+const SOURCE_URL = "https://img.opencritic.com/calendar/OpenCritic.ics";
+const OUTPUT_FILE = "docs/calendar.ics";
+const CUT_OFF_DATE = DateTime.now().minus({ months: 6 });
+
+const res = await fetch(SOURCE_URL);
 if (!res.ok) {
-  throw new Error(`Не удалось загрузить .ics: ${res.status}`);
-}
-const rawICS = await res.text();
-const parsed = ical.parseICS(rawICS);
-const cutoff = DateTime.now().minus({ months: 6 });
-
-let output = `BEGIN:VCALENDAR\r
-VERSION:2.0\r
-PRODID:-//OpenCritic.com//OpenCritic 2025 Gaming Calendar//EN\r
-NAME:OpenCritic Gaming Calendar\r
-X-WR-CALNAME:OpenCritic Gaming Calendar\r
-`;
-
-let kept = 0;
-for (const k in parsed) {
-  const ev = parsed[k];
-  if (ev.type !== "VEVENT") continue;
-  if (!ev.start || DateTime.fromJSDate(ev.start) < cutoff) continue;
-
-  output += `BEGIN:VEVENT\r
-UID:${ev.uid}\r
-SUMMARY:${ev.summary}\r
-DTSTART:${DateTime.fromJSDate(ev.start).toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'")}\r
-DTEND:${DateTime.fromJSDate(ev.end || ev.start).toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'")}\r
-DESCRIPTION:${ev.description || ""}\r
-LOCATION:${ev.location || ""}\r
-END:VEVENT\r
-`;
-  kept++;
+  throw new Error(`Failed to fetch calendar: ${res.statusText}`);
 }
 
-output += "END:VCALENDAR\r\n";
-console.log(`Событий после фильтрации: ${kept}`);
+const rawData = await res.text();
+const parsed = ical.parseICS(rawData);
+
+const events = Object.values(parsed).filter(
+  (e) => e.type === "VEVENT" && e.start && DateTime.fromJSDate(e.start) >= CUT_OFF_DATE
+);
+
+let result = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//OpenCritic.com//OpenCritic 2025 Gaming Calendar//EN
+NAME:OpenCritic Gaming Calendar
+X-WR-CALNAME:OpenCritic Gaming Calendar`;
+
+for (const e of events) {
+  result += `
+BEGIN:VEVENT
+UID:${e.uid}
+DTSTAMP:${DateTime.fromJSDate(e.dtstamp || new Date()).toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'")}
+DTSTART:${DateTime.fromJSDate(e.start).toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'")}
+${e.end ? `DTEND:${DateTime.fromJSDate(e.end).toUTC().toFormat("yyyyMMdd'T'HHmmss'Z')`}` : ""}
+SUMMARY:${e.summary || "Untitled Event"}
+DESCRIPTION:${e.description || ""}
+LOCATION:${e.location || ""}
+END:VEVENT`;
+}
+
+result += `\nEND:VCALENDAR`;
 
 fs.mkdirSync("docs", { recursive: true });
-fs.writeFileSync("docs/calendar.ics", output);
-console.log("Готово: docs/calendar.ics");
+fs.writeFileSync(OUTPUT_FILE, result.trim(), "utf8");
+
+console.log(`Generated calendar with ${events.length} events.`);
